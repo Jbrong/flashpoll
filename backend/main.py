@@ -1,9 +1,10 @@
-import uvicorn
 from dotenv import load_dotenv
+load_dotenv()
+import uvicorn
 from fastapi import FastAPI
 from polls.create import router as polls_router
 
-load_dotenv()
+
 app = FastAPI()
 app.include_router(polls_router)
 
