@@ -46,6 +46,8 @@ def create_poll(poll: CreatePollRequest) -> dict:
     poll_expiry_time = poll_creation_time + timedelta(minutes=poll.poll_expiry)
     poll_expiry_time_iso = poll_expiry_time.isoformat()
 
+    poll.poll_answer_options = [option.lower() for option in poll.poll_answer_options]
+
     poll_data = {
         "poll_id": poll_id,
         "poll_admin_id": poll_admin_id,
