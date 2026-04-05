@@ -1,5 +1,6 @@
 import boto3
 import os
+from boto3.dynamodb.conditions import Key
 
 
 dynamodb_url = os.environ.get('DYNAMODB_URL')
@@ -39,7 +40,7 @@ def get_poll(poll_id: str) -> dict:
     print(f"Error retrieving poll: {e}")
     return None
 
-def save_vote(poll_id: str, vote_info: str, vote_id: str, vote_time: str) -> bool:
+def save_vote(poll_id: str, vote_info: str, vote_id: str, vote_time: str, client_ip: str) -> bool:
   """
   :param poll_id: The poll id
   :param vote_info: The vote info passed from the vote function
@@ -52,9 +53,23 @@ def save_vote(poll_id: str, vote_info: str, vote_id: str, vote_time: str) -> boo
       "poll_id": poll_id,
       "vote_info": vote_info,
       "vote_id": vote_id,
-      "vote_time": vote_time})
+      "vote_time": vote_time,
+      "client_ip": client_ip})
     return True
   except Exception as e:
     print(f"Error saving vote: {e}")
     return False
 
+
+def get_votes(poll_id: str) -> list:
+  """
+  Get votes from dynamodb
+  :param poll_id: The poll id
+  :return: list of votes for the poll
+  """
+  try:
+    votes_data = votes_table.query(KeyConditionExpression=Key('poll_id').eq(poll_id))
+    return votes_data.get('Items')
+  except Exception as e:
+    print(f"Error retrieving votes: {e}")
+    return []
