@@ -3,6 +3,7 @@ import { useState } from 'react';
 function CreatePoll() {
     const [question, setQuestion] = useState('');
     const [options, setOptions] = useState(['','']);
+    const [pollId, setPollId] = useState(null);
 
     return (
         <div>
@@ -39,8 +40,12 @@ function CreatePoll() {
                     })
                 })
                     .then((response) => response.json())
-                    .then((data) => console.log(data));
+                    .then((data) => {
+                        setPollId(data.poll_id);
+                        console.log(data);
+                    });
             }}>Create</button>
+            {pollId && <p>Poll ID: {pollId}</p>}
         </div>
     );
 }
