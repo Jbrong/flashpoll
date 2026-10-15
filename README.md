@@ -47,9 +47,9 @@ Flashpoll runs on a fully serverless AWS stack — intentionally different from 
 ```
 User → Route 53 → CloudFront → S3 (React frontend)
                       ↓
-              API Gateway (HTTP API; WebSocket in Phase 2)
+              Lambda function URL (/api/*)
                       ↓
-                   Lambda
+                   Lambda (FastAPI)
                       ↓
                   DynamoDB (TTL auto-deletes expired polls)
 ```
@@ -60,11 +60,11 @@ User → Route 53 → CloudFront → S3 (React frontend)
 |---|---|
 | Route 53 | Domain + DNS for flashpoll.dev |
 | S3 + CloudFront | Static React frontend, global CDN |
-| API Gateway (HTTP API) | Poll CRUD — create, read, vote |
-| API Gateway (WebSocket) | Real-time results push to connected clients |
+| Lambda function URL | API endpoint behind CloudFront — free, unlike API Gateway |
+| *(Phase 2)* | Real-time results push — design must fit the free tier |
 | Lambda | FastAPI backend (Python 3.13, arm64) |
-| DynamoDB | Polls, votes, admin tokens — TTL for auto-expiry |
-| WAF | Rate limiting on vote endpoint — prevent stuffing |
+| DynamoDB | Polls and vote markers — TTL for auto-expiry, provisioned within the always-free tier |
+| WAF *(Phase 3)* | Rate limiting on vote endpoint — prevent stuffing |
 | CloudWatch | Monitoring, alarms, anomaly detection |
 | ACM | SSL/TLS — HTTPS enforced everywhere |
 
@@ -72,15 +72,15 @@ User → Route 53 → CloudFront → S3 (React frontend)
 
 **DynamoDB TTL** is the elegant solution to ephemeral polls — when a poll expires, DynamoDB deletes the record automatically. No cron jobs, no cleanup scripts, no stale data.
 
-**WebSocket API via API Gateway** pushes vote updates to all connected clients in real time. When someone votes, everyone watching the results page sees it instantly.
+**Live results** refresh every few seconds today; true push updates are Phase 2, designed to stay inside the AWS free tier.
 
-**Lambda over ECS/Fargate** — for a stateless, event-driven workload like this, serverless is the right fit. No containers to manage, no idle compute costs.
+**Lambda over ECS/Fargate** — for a stateless, event-driven workload like this, serverless is the right fit. No containers to manage, no idle compute costs. The whole stack is sized to run on AWS's always-free tier.
 
 ---
 
 ## 🔒 Security Design
 
-- **WAF rate limiting** on the vote endpoint — configurable per poll, enforces one-per-IP when selected
+- **WAF rate limiting** on the vote endpoint (Phase 3); vote control is already enforced server-side
 - **DynamoDB TTL** handles data lifecycle automatically — no lingering PII after expiry
 - **Admin tokens** are 192-bit random secrets; only their SHA-256 hash is stored. The token travels in the URL fragment (never sent to the server, so never in access logs) and as an `X-Admin-Token` header to the API
 - **Server-enforced rules** — vote control and results visibility are checked by the API, not just hidden in the UI
@@ -188,7 +188,7 @@ Votes are counted atomically with a DynamoDB transaction, so reading results is 
 - [x] Domain registered (flashpoll.dev)
 - [x] Architecture designed
 - [ ] Phase 1 — Core (poll CRUD, DynamoDB TTL, shareable links) — code + tests done, deploy pending
-- [ ] Phase 2 — Real-time (WebSocket live results)
+- [ ] Phase 2 — Real-time (push live results, within the free tier)
 - [ ] Phase 3 — Security hardening (WAF, CloudWatch alarms)
 - [ ] Phase 4 — Terraform IaC, architecture writeup, portfolio polish
 

@@ -28,22 +28,39 @@ variable "lambda_zip_path" {
   default     = "../backend/dist/lambda.zip"
 }
 
-variable "api_throttle_rate" {
-  description = "Steady-state requests/second allowed through API Gateway (account-wide guard until WAF lands in Phase 3)."
-  type        = number
-  default     = 50
-}
-
-variable "api_throttle_burst" {
-  description = "Burst request allowance for API Gateway."
-  type        = number
-  default     = 100
-}
-
 variable "log_retention_days" {
-  description = "CloudWatch log retention for the API and Lambda."
+  description = "CloudWatch log retention for the Lambda."
   type        = number
-  default     = 14
+  default     = 7
+}
+
+variable "dynamodb_billing_mode" {
+  description = "PROVISIONED stays inside DynamoDB's always-free tier. PAY_PER_REQUEST scales freely but bills every request."
+  type        = string
+  default     = "PROVISIONED"
+}
+
+variable "dynamodb_capacity" {
+  description = <<-EOT
+    Provisioned capacity units. The always-free tier is 25 RCU + 25 WCU per region, shared by
+    ALL provisioned tables in the account, so the defaults total 21/21 to leave headroom.
+  EOT
+  type = object({
+    polls_read        = number
+    polls_write       = number
+    admin_index_read  = number
+    admin_index_write = number
+    votes_read        = number
+    votes_write       = number
+  })
+  default = {
+    polls_read        = 10
+    polls_write       = 10
+    admin_index_read  = 1
+    admin_index_write = 1
+    votes_read        = 10
+    votes_write       = 10
+  }
 }
 
 variable "table_deletion_protection" {
@@ -53,13 +70,13 @@ variable "table_deletion_protection" {
 }
 
 variable "budget_alert_email" {
-  description = "If set, creates a monthly AWS budget that emails this address at 80% and 100%."
+  description = "Strongly recommended. Emails this address as soon as the account spends anything (> $0.01 in a month) and when the forecast exceeds monthly_budget_usd."
   type        = string
   default     = ""
 }
 
 variable "monthly_budget_usd" {
-  description = "Monthly budget amount for the alert above."
+  description = "Monthly budget amount for the forecast alert."
   type        = number
-  default     = 10
+  default     = 1
 }

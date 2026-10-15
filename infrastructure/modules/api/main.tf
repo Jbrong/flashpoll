@@ -1,4 +1,6 @@
-# The FastAPI app as one Lambda behind an API Gateway HTTP API (docs/spec.md, 4.1).
+# The FastAPI app as one Lambda, exposed through a function URL that only CloudFront calls
+# (docs/spec.md, 4.1). A function URL instead of API Gateway because it's free forever,
+# whereas API Gateway's free allowance is 12 months / sign-up credits only.
 
 # --- Lambda -------------------------------------------------------------------
 
@@ -83,61 +85,13 @@ resource "aws_lambda_function" "api" {
   depends_on = [aws_iam_role_policy.lambda]
 }
 
-# --- API Gateway --------------------------------------------------------------
+# --- Function URL -------------------------------------------------------------
 
-resource "aws_apigatewayv2_api" "http" {
-  name          = "${var.name_prefix}-api"
-  protocol_type = "HTTP"
-}
-
-resource "aws_apigatewayv2_integration" "lambda" {
-  api_id                 = aws_apigatewayv2_api.http.id
-  integration_type       = "AWS_PROXY"
-  integration_uri        = aws_lambda_function.api.invoke_arn
-  payload_format_version = "2.0"
-  timeout_milliseconds   = 10000
-}
-
-resource "aws_apigatewayv2_route" "api" {
-  api_id    = aws_apigatewayv2_api.http.id
-  route_key = "ANY /api/{proxy+}"
-  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
-}
-
-resource "aws_cloudwatch_log_group" "access" {
-  name              = "/aws/apigateway/${var.name_prefix}-api"
-  retention_in_days = var.log_retention_days
-}
-
-resource "aws_apigatewayv2_stage" "default" {
-  api_id      = aws_apigatewayv2_api.http.id
-  name        = "$default"
-  auto_deploy = true
-
-  default_route_settings {
-    throttling_rate_limit  = var.throttle_rate
-    throttling_burst_limit = var.throttle_burst
-  }
-
-  # No headers in the access log, so voter and admin tokens never land here.
-  access_log_settings {
-    destination_arn = aws_cloudwatch_log_group.access.arn
-    format = jsonencode({
-      requestId = "$context.requestId"
-      time      = "$context.requestTime"
-      method    = "$context.httpMethod"
-      path      = "$context.path"
-      status    = "$context.status"
-      latencyMs = "$context.responseLatency"
-      error     = "$context.integrationErrorMessage"
-    })
-  }
-}
-
-resource "aws_lambda_permission" "apigw" {
-  statement_id  = "AllowApiGatewayInvoke"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.api.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_apigatewayv2_api.http.execution_arn}/*"
+# Public (auth NONE) because CloudFront calls it as a plain HTTPS origin. The app rejects
+# any request without CloudFront's X-Origin-Verify secret, so calling it directly gets 403.
+# With NONE, the provider adds the lambda:InvokeFunctionUrl and lambda:InvokeFunction
+# (InvokedViaFunctionUrl) permissions AWS requires for new function URLs.
+resource "aws_lambda_function_url" "api" {
+  function_name      = aws_lambda_function.api.function_name
+  authorization_type = "NONE"
 }

@@ -128,6 +128,7 @@ Every non-2xx response has this body:
 | 409 | `poll_closed` | Vote on a closed poll |
 | 409 | `already_voted` | Vote control rejected a repeat vote |
 | 422 | `invalid_request` | Body/params fail validation; `error.fields` lists problems |
+| 503 | `busy` | DynamoDB capacity exhausted (free-tier provisioned throughput); `Retry-After` is set |
 | 500 | `internal_error` | Anything else |
 
 ### 2.2 Headers
@@ -218,14 +219,14 @@ Admin auth (`X-Admin-Token`). Deletes the poll and all its vote records.
 
 ## 3. Data model (DynamoDB)
 
-Two tables, both on-demand billing, both with TTL on attribute `ttl`.
+Two tables, both with TTL on attribute `ttl`. Provisioned capacity in AWS (free tier), on-demand locally.
 
 ### 3.1 `polls`
 
 | Attribute | Type | Notes |
 |---|---|---|
 | `poll_id` (PK) | S | 8-char URL-safe random ID (48 bits). Created with a conditional put; retried on collision. |
-| `admin_token_hash` | S | SHA-256 hex of the admin token. GSI `admin_token_hash-index` (keys only + projection ALL). |
+| `admin_token_hash` | S | SHA-256 hex of the admin token. GSI `admin_token_hash-index`, keys-only projection (vote updates never touch the index). |
 | `question` | S | |
 | `options` | L of S | Original casing |
 | `vote_control` | S | |
@@ -273,9 +274,10 @@ All-or-nothing: a rejected repeat vote never increments the count.
 ### 4.1 Runtime
 
 - **Backend**: one FastAPI app (`backend/flashpoll`). Locally it runs under uvicorn; in AWS
-  it runs as a single Lambda behind API Gateway via the Mangum adapter
+  it runs as a single Lambda behind a Lambda function URL via the Mangum adapter
   (`backend/lambda_handler.py`). **Decision**: one "monolith" Lambda rather than one Lambda
   per route — simpler to deploy, test and run locally, and cold starts stay small at this size.
+  **Decision**: a function URL rather than API Gateway, to stay in the always-free tier.
 - **Frontend**: React + Vite, static build served from S3 via CloudFront.
 - **Data**: DynamoDB, as above.
 
@@ -312,9 +314,12 @@ Terraform in `infrastructure/` (runbook in `infrastructure/README.md`):
   `/api/*` to API Gateway with caching disabled. A CloudFront Function rewrites app routes
   to `index.html` and redirects `www` to the apex. A response-headers policy sets HSTS, CSP,
   `X-Frame-Options: DENY`, `nosniff` and `Referrer-Policy`.
-- **API Gateway HTTP API** → one **Lambda** (python3.13, arm64) running the FastAPI app via
-  Mangum. Stage-level throttling guards cost until WAF arrives in Phase 3.
-- **DynamoDB** tables as in section 3, on-demand, TTL enabled, deletion protection on.
+- **Lambda function URL** → one **Lambda** (python3.13, arm64) running the FastAPI app via
+  Mangum. The URL is public but useless without CloudFront's origin secret.
+- **DynamoDB** tables as in section 3, **provisioned** capacity sized inside the always-free
+  tier (21 RCU / 21 WCU total), TTL enabled, deletion protection on.
+- **Cost target: the AWS always-free tier.** The only fixed cost is the Route 53 hosted zone.
+  A budget alert fires on the first cent of spend.
 - Terraform state in a versioned, encrypted S3 bucket with native locking.
 
 ---
@@ -324,7 +329,7 @@ Terraform in `infrastructure/` (runbook in `infrastructure/README.md`):
 | Phase | Scope | Done when |
 |---|---|---|
 | **1 — Core** | Everything in sections 1–3 except WebSocket push. Local dev with DynamoDB Local. | Backend and frontend tests pass; full flow works locally (create → vote → results → admin close/delete). |
-| **2 — Real-time** | API Gateway WebSocket API; connect/disconnect handlers store connections per poll; vote handler broadcasts new counts. Frontend swaps polling for a socket, falling back to polling. | Two browsers on one poll see each other's votes in under 1s. |
+| **2 — Real-time** | Push new counts to open results pages instead of 5-second polling. **Open question:** API Gateway WebSockets aren't in the always-free tier, so this needs a free-tier-compatible design (or a decision to accept a small cost). | Two browsers on one poll see each other's votes in under 1s. |
 | **3 — Security hardening** | WAF rate limits (votes per IP, creates per IP), CloudWatch alarms and dashboards, origin secret in Secrets Manager. (Security headers and origin protection already shipped with the Phase 1 infra.) | Rate limits verified; alarms fire on test traffic. |
 | **4 — IaC & polish** | All AWS resources in Terraform; GitHub Actions for test, plan, deploy; architecture diagram and write-up. | Clean `terraform apply` from scratch; CI deploys on merge to `master`. |
 
@@ -342,7 +347,10 @@ These were chosen while drafting; change any of them before they harden.
 3. **Votes are final** — no changing your vote.
 4. **Admin link is unrecoverable** (only a hash is stored).
 5. **Default vote control `one_per_browser`, default visibility `live`.**
-6. **Single Lambda** running the whole FastAPI app (4.1).
+6. **Single Lambda** running the whole FastAPI app, exposed by a function URL rather than
+   API Gateway (4.1) — chosen for the always-free tier.
+9. **Free-tier first.** Provisioned DynamoDB (caps throughput at a few votes/second
+   sustained) instead of on-demand; real-time push (Phase 2) must fit the free tier too.
 7. **URL shapes** `/p/{id}` (as in the README) and `/admin#{token}` (fragment instead of the
    README's `/admin/{token}`, to keep the token out of server logs).
 8. **Python 3.13** (newest Lambda runtime) instead of 3.10.

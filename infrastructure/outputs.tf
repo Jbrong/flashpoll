@@ -17,7 +17,7 @@ output "cloudfront_domain" {
 }
 
 output "api_endpoint" {
-  description = "Direct API Gateway URL. Requests here are rejected without the CloudFront origin secret."
+  description = "Direct Lambda function URL. Requests here are rejected without the CloudFront origin secret."
   value       = module.api.api_endpoint
 }
 

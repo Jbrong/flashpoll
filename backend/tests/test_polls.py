@@ -71,3 +71,25 @@ def test_unknown_route_uses_error_shape(client):
 
 def test_health(client):
     assert client.get("/api/health").json() == {"status": "ok"}
+
+
+def test_dynamodb_throttling_returns_503(client, make_poll, monkeypatch):
+    from botocore.exceptions import ClientError
+
+    poll = make_poll()
+    service = client.app.state.service
+
+    def throttled(*args, **kwargs):
+        raise ClientError(
+            {
+                "Error": {"Code": "TransactionCanceledException", "Message": "cancelled"},
+                "CancellationReasons": [{"Code": "ThrottlingError"}, {"Code": "None"}],
+            },
+            "TransactWriteItems",
+        )
+
+    monkeypatch.setattr(service.store.client, "transact_write_items", throttled)
+    response = vote(client, poll["poll_id"], 0)
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "busy"
+    assert response.headers["Retry-After"] == "2"

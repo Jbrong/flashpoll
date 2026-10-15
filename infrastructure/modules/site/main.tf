@@ -1,4 +1,4 @@
-# Static frontend on S3 behind CloudFront, with /api/* routed to API Gateway so the
+# Static frontend on S3 behind CloudFront, with /api/* routed to the Lambda function URL so the
 # browser sees one origin (docs/spec.md, 2).
 
 terraform {

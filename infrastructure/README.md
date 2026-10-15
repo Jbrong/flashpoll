@@ -6,25 +6,25 @@ Terraform for everything in AWS. One stack (`./`) plus a one-time state bootstra
 ```
 Route 53 ─▶ CloudFront ─┬─ /*      ─▶ S3 (private, Origin Access Control)
   (ACM cert,            │            + viewer-request function: SPA routing, www → apex
-   security headers)    └─ /api/*  ─▶ API Gateway (HTTP API, throttled)
-                                       ─▶ Lambda (FastAPI via Mangum, python3.13 arm64)
-                                          ─▶ DynamoDB: polls + votes (on-demand, TTL)
+   security headers)    └─ /api/*  ─▶ Lambda function URL
+                                       (FastAPI via Mangum, python3.13 arm64)
+                                          ─▶ DynamoDB: polls + votes (provisioned, TTL)
 ```
 
 | Module | What it creates |
 |---|---|
 | `modules/dynamodb` | `polls` and `votes` tables with TTL and the admin-token GSI |
-| `modules/api` | Lambda, least-privilege IAM role, HTTP API, access logs, throttling |
+| `modules/api` | Lambda, least-privilege IAM role, function URL, log group |
 | `modules/site` | S3 bucket, CloudFront distribution and function, ACM cert, DNS records, security headers |
 
 ### How requests reach the API safely
 
 - CloudFront adds a secret `X-Origin-Verify` header to every `/api/*` request. The Lambda
-  rejects requests without it, so the raw API Gateway URL is useless on its own.
+  rejects requests without it, so the raw function URL is useless on its own.
 - The API reads the voter's IP from `CloudFront-Viewer-Address`, which CloudFront sets and
   viewers can't forge. (`X-Forwarded-For` is ignored.)
 - Only `Content-Type`, `X-Voter-Token`, `X-Admin-Token` and `CloudFront-Viewer-Address` are
-  forwarded to the API. Access logs record no headers, so tokens never land in logs.
+  forwarded to the API, and the app never logs request headers, so tokens never land in logs.
 
 ---
 
@@ -61,7 +61,7 @@ the bucket is protected from `destroy`.
 ```bash
 cd infrastructure
 cp backend.hcl.example backend.hcl         # put the bucket name from step 1 in it
-cp terraform.tfvars.example terraform.tfvars   # optional; set budget_alert_email at least
+cp terraform.tfvars.example terraform.tfvars   # set budget_alert_email (see "Cost")
 terraform init -backend-config=backend.hcl
 git add .terraform.lock.hcl                # commit the provider lock file
 ```
@@ -83,6 +83,9 @@ terraform apply tfplan
 Expect 5–15 minutes: the ACM certificate validates through DNS, then CloudFront deploys
 globally.
 
+If the function URL step fails with a `PublicPolicyException`, the account blocks public
+Lambda resource policies; that setting has to allow the function URL's policy.
+
 ### 5. Publish the frontend
 
 ```bash
@@ -93,8 +96,9 @@ scripts/deploy_frontend.sh                 # from the repo root
 
 ```bash
 curl -s https://flashpoll.dev/api/health                     # {"status":"ok"}
-curl -s "$(terraform -chdir=infrastructure output -raw api_endpoint)/api/health"
+curl -s "$(terraform -chdir=infrastructure output -raw api_endpoint)api/health"
                                                              # 403 forbidden (no origin secret)
+                                                             # (the function URL already ends in "/", hence no slash before api)
 curl -sI https://www.flashpoll.dev/p/test | grep -i location # 301 -> https://flashpoll.dev/p/test
 curl -sI https://flashpoll.dev/ | grep -i strict-transport   # HSTS header present
 ```
@@ -121,17 +125,51 @@ terraform apply -var table_deletion_protection=false
 terraform destroy
 ```
 
-## Cost
+## Cost: staying in the free tier
 
-At portfolio traffic this is close to free: Lambda, API Gateway, DynamoDB on-demand and
-CloudFront all sit inside free tiers or cost cents. The fixed cost is the Route 53 hosted
-zone ($0.50/month). Set `budget_alert_email` to get an email at 80% and 100% of
-`monthly_budget_usd` (default $10).
+The stack is built to run on AWS's **always-free** allowances, which never expire:
+
+| Service | Always-free allowance | How the stack stays inside it |
+|---|---|---|
+| Lambda | 1M requests + 400,000 GB-seconds / month | One function, 512 MB, arm64 |
+| Lambda function URL | No charge beyond Lambda | Used instead of API Gateway, whose free tier is 12 months / sign-up credits only |
+| DynamoDB | 25 RCU + 25 WCU + 25 GB / region | **Provisioned** 21 RCU / 21 WCU total (on-demand is not covered) |
+| CloudFront | 1 TB out + 10M requests + 2M function runs / month | Static assets cached at the edge |
+| CloudWatch Logs | 5 GB ingestion / month | 7-day retention, no access logs |
+| ACM, Budgets (first 2) | Free | |
+
+What is **not** free:
+
+- **Route 53 hosted zone: $0.50/month**, plus the yearly `.dev` domain renewal (~$12–15).
+- **S3**: storage is a few hundred KB, so cents at most; it's only "free" during the
+  12-month / credits period.
+- Anything past the allowances above. Set `budget_alert_email`: it creates a budget that
+  emails you on the **first cent** of actual spend, and when the month's forecast passes
+  `monthly_budget_usd` ($1 by default).
+
+Things to know:
+
+- **The DynamoDB allowance is shared** by every provisioned table in the account and
+  region. If the account has other tables, lower `dynamodb_capacity` so the total stays ≤ 25.
+- **Provisioned capacity has a ceiling.** Roughly 2–5 votes/second sustained (burst capacity
+  absorbs short spikes of a few hundred). Past that the API answers `503 busy` with
+  `Retry-After` instead of failing. For a viral poll, switch
+  `dynamodb_billing_mode = "PAY_PER_REQUEST"` (pay per request, cents per thousand votes).
+- **Live results poll every 5 s**, so one open results page is ~720 requests/hour, against
+  1M free Lambda requests a month.
+- **New AWS accounts (created after 15 July 2025)** are on the credit-based Free plan, which
+  ends after 6 months or when credits run out; the account then has to be upgraded to a paid
+  plan to keep running. The always-free allowances above continue on the paid plan.
+- **CloudFront flat-rate "Free" plan.** AWS also offers a $0/month CloudFront plan that
+  bundles WAF, DDoS protection and Route 53 DNS for one distribution (1M requests, 100 GB).
+  It's a console subscription, not Terraform, and its limits and feature restrictions should
+  be checked in the console before switching — it may be the cheapest way to get WAF rate
+  limiting (Phase 3).
 
 ## Not here yet
 
-- **WAF** rate limits on votes and poll creation (Phase 3). Until then API Gateway
-  throttling (`api_throttle_rate` / `api_throttle_burst`) caps total traffic.
+- **WAF** rate limits on votes and poll creation (Phase 3). Until then nothing caps request
+  volume except DynamoDB's provisioned capacity; the zero-spend budget alert is the tripwire.
 - CloudWatch alarms and dashboards (Phase 3).
 - CI/CD workflows (Phase 4).
 - The origin secret lives in Terraform state and the Lambda's environment. Moving it to

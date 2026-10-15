@@ -24,14 +24,6 @@ variable "origin_verify_secret" {
   sensitive = true
 }
 
-variable "throttle_rate" {
-  type = number
-}
-
-variable "throttle_burst" {
-  type = number
-}
-
 variable "log_retention_days" {
   type = number
 }

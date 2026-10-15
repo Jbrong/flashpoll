@@ -3,5 +3,13 @@
 # environment        = "prod"
 # domain_name        = "flashpoll.dev"
 # include_www        = true
+# Strongly recommended: emails you the moment anything costs money.
 # budget_alert_email = "you@example.com"
-# monthly_budget_usd = 10
+# monthly_budget_usd = 1
+#
+# Raise these only if you know the account's other tables leave room in the
+# always-free 25 RCU / 25 WCU per region.
+# dynamodb_capacity = {
+#   polls_read = 10, polls_write = 10, admin_index_read = 1, admin_index_write = 1,
+#   votes_read = 10, votes_write = 10,
+# }

@@ -1,5 +1,6 @@
 import logging
 
+from botocore.exceptions import ClientError
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -47,6 +48,23 @@ class Unauthorized(ApiError):
         super().__init__(401, "unauthorized", "Invalid or missing admin token")
 
 
+# DynamoDB capacity errors: provisioned throughput is small (always-free tier), so a burst
+# can exhaust it after boto3's own retries. Tell the client to retry instead of a bare 500.
+THROTTLE_CODES = {
+    "ProvisionedThroughputExceededException",
+    "ThrottlingException",
+    "RequestLimitExceeded",
+}
+THROTTLE_REASONS = {"ThrottlingError", "ProvisionedThroughputExceeded"}
+
+
+def is_throttle(err: ClientError) -> bool:
+    if err.response.get("Error", {}).get("Code") in THROTTLE_CODES:
+        return True
+    reasons = err.response.get("CancellationReasons", [])
+    return any(reason.get("Code") in THROTTLE_REASONS for reason in reasons)
+
+
 def error_body(code: str, message: str, **extra) -> dict:
     return {"error": {"code": code, "message": message, **extra}}
 
@@ -70,6 +88,18 @@ def register_error_handlers(app: FastAPI) -> None:
     async def http_error(_: Request, exc: StarletteHTTPException):
         code = "not_found" if exc.status_code == 404 else "http_error"
         return JSONResponse(error_body(code, str(exc.detail)), status_code=exc.status_code)
+
+    @app.exception_handler(ClientError)
+    async def aws_error(_: Request, exc: ClientError):
+        if is_throttle(exc):
+            logger.warning("DynamoDB throttled: %s", exc)
+            return JSONResponse(
+                error_body("busy", "Flashpoll is busy right now. Try again in a moment."),
+                status_code=503,
+                headers={"Retry-After": "2"},
+            )
+        logger.exception("AWS error", exc_info=exc)
+        return JSONResponse(error_body("internal_error", "Something went wrong"), status_code=500)
 
     @app.exception_handler(Exception)
     async def unhandled_error(_: Request, exc: Exception):

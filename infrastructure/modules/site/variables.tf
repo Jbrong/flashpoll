@@ -11,7 +11,7 @@ variable "include_www" {
 }
 
 variable "api_domain" {
-  description = "API Gateway hostname to route /api/* to."
+  description = "Lambda function URL hostname to route /api/* to."
   type        = string
 }
 

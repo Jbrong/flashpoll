@@ -59,6 +59,8 @@ export type ErrorCode =
   | 'poll_closed'
   | 'already_voted'
   | 'invalid_request'
+  | 'busy'
+  | 'forbidden'
   | 'internal_error'
   | 'network_error';
 

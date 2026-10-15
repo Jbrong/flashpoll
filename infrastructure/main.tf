@@ -7,6 +7,8 @@ module "data" {
 
   name_prefix         = local.name
   deletion_protection = var.table_deletion_protection
+  billing_mode        = var.dynamodb_billing_mode
+  capacity            = var.dynamodb_capacity
 }
 
 # Shared secret CloudFront adds to every API request; the API rejects requests without it,
@@ -25,8 +27,6 @@ module "api" {
   polls_table          = module.data.polls_table
   votes_table          = module.data.votes_table
   origin_verify_secret = random_password.origin_verify.result
-  throttle_rate        = var.api_throttle_rate
-  throttle_burst       = var.api_throttle_burst
   log_retention_days   = var.log_retention_days
 }
 
@@ -53,14 +53,20 @@ resource "aws_budgets_budget" "monthly" {
   limit_unit   = "USD"
   time_unit    = "MONTHLY"
 
-  dynamic "notification" {
-    for_each = [80, 100]
-    content {
-      comparison_operator        = "GREATER_THAN"
-      threshold                  = notification.value
-      threshold_type             = "PERCENTAGE"
-      notification_type          = "ACTUAL"
-      subscriber_email_addresses = [var.budget_alert_email]
-    }
+  # "Zero spend" alert: any actual charge at all means something left the free tier.
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 0.01
+    threshold_type             = "ABSOLUTE_VALUE"
+    notification_type          = "ACTUAL"
+    subscriber_email_addresses = [var.budget_alert_email]
+  }
+
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 100
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "FORECASTED"
+    subscriber_email_addresses = [var.budget_alert_email]
   }
 }

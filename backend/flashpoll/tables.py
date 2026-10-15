@@ -1,7 +1,8 @@
 """DynamoDB table definitions (docs/spec.md, section 3).
 
 Used by the local bootstrap script and the test suite, so both match what
-Terraform provisions in AWS. Keep the three in sync.
+Terraform provisions in AWS. Keep the three in sync. (Locally the tables are on-demand;
+in AWS they use provisioned capacity to stay inside the always-free tier.)
 """
 
 ADMIN_INDEX = "admin_token_hash-index"
@@ -20,7 +21,9 @@ def polls_table(name: str) -> dict:
             {
                 "IndexName": ADMIN_INDEX,
                 "KeySchema": [{"AttributeName": "admin_token_hash", "KeyType": "HASH"}],
-                "Projection": {"ProjectionType": "ALL"},
+                # Keys only: the app re-reads the poll from the base table, and vote
+                # count updates then never write to the index.
+                "Projection": {"ProjectionType": "KEYS_ONLY"},
             }
         ],
     }
