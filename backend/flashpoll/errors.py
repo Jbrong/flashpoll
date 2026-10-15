@@ -1,0 +1,72 @@
+import logging
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+logger = logging.getLogger(__name__)
+
+
+class ApiError(Exception):
+    """An error with a stable machine-readable code (see docs/spec.md, section 2.1)."""
+
+    def __init__(self, status: int, code: str, message: str):
+        self.status = status
+        self.code = code
+        self.message = message
+
+
+class PollNotFound(ApiError):
+    def __init__(self):
+        super().__init__(404, "poll_not_found", "Poll not found")
+
+
+class PollClosed(ApiError):
+    def __init__(self):
+        super().__init__(409, "poll_closed", "This poll is closed")
+
+
+class AlreadyVoted(ApiError):
+    def __init__(self):
+        super().__init__(409, "already_voted", "You have already voted on this poll")
+
+
+class ResultsHidden(ApiError):
+    def __init__(self):
+        super().__init__(403, "results_hidden", "Results are not visible yet")
+
+
+class Unauthorized(ApiError):
+    def __init__(self):
+        super().__init__(401, "unauthorized", "Invalid or missing admin token")
+
+
+def _body(code: str, message: str, **extra) -> dict:
+    return {"error": {"code": code, "message": message, **extra}}
+
+
+def register_error_handlers(app: FastAPI) -> None:
+    @app.exception_handler(ApiError)
+    async def api_error(_: Request, exc: ApiError):
+        return JSONResponse(_body(exc.code, exc.message), status_code=exc.status)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(_: Request, exc: RequestValidationError):
+        fields = [
+            {"loc": [str(part) for part in err["loc"]], "message": err["msg"]}
+            for err in exc.errors()
+        ]
+        return JSONResponse(
+            _body("invalid_request", "Request is invalid", fields=fields), status_code=422
+        )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error(_: Request, exc: StarletteHTTPException):
+        code = "not_found" if exc.status_code == 404 else "http_error"
+        return JSONResponse(_body(code, str(exc.detail)), status_code=exc.status_code)
+
+    @app.exception_handler(Exception)
+    async def unhandled_error(_: Request, exc: Exception):
+        logger.exception("Unhandled error", exc_info=exc)
+        return JSONResponse(_body("internal_error", "Something went wrong"), status_code=500)

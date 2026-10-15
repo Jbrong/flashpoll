@@ -4,13 +4,23 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-fastapi = "*"
-uvicorn = "*"
-python-dotenv = "*"
-boto3 = "*"
+fastapi = "~=0.115"
+mangum = "~=0.19"
+boto3 = "~=1.35"
 
 [dev-packages]
+uvicorn = {extras = ["standard"], version = "*"}
+python-dotenv = "*"
+pytest = "*"
+moto = {extras = ["dynamodb"], version = "~=5.0"}
+httpx = "*"
+ruff = "*"
 
 [requires]
-python_version = "3.10"
-python_full_version = "3.10.16"
+python_version = "3.13"
+
+[scripts]
+dev = "python dev_server.py"
+test = "pytest"
+lint = "ruff check ."
+bootstrap = "python scripts/bootstrap_tables.py"
