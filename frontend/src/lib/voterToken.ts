@@ -1,13 +1,13 @@
 // A random per-browser ID used for "one vote per browser" and "results after voting".
 // It is a courtesy limit, not a security control (docs/spec.md, 1.3).
 const STORAGE_KEY = 'flashpoll.voterToken';
-let memoryToken = null;
+let memoryToken: string | null = null;
 
-function newToken() {
+function newToken(): string {
   return crypto.randomUUID();
 }
 
-export function getVoterToken() {
+export function getVoterToken(): string {
   try {
     let token = localStorage.getItem(STORAGE_KEY);
     if (!token) {

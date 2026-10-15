@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { type ChangeEvent, type FormEvent, useState } from 'react';
 import { Link } from 'react-router-dom';
 import CopyField from '../components/CopyField';
 import ErrorMessage from '../components/ErrorMessage';
-import { api } from '../lib/api';
+import { api, toError } from '../lib/api';
+import { VISIBILITY_LABELS, VOTE_CONTROL_LABELS } from '../lib/labels';
 import { formatDateTime } from '../lib/time';
+import type { CreatePollResponse, ResultsVisibility, VoteControl } from '../lib/types';
 
 const MIN_OPTIONS = 2;
 const MAX_OPTIONS = 6;
@@ -16,25 +18,48 @@ const EXPIRY_PRESETS = [
   { value: '10080', label: '1 week' },
   { value: 'custom', label: 'Custom' },
 ];
-const CUSTOM_UNITS = { minutes: 1, hours: 60, days: 1440 };
+const CUSTOM_UNITS = { minutes: 1, hours: 60, days: 1440 } as const;
+type CustomUnit = keyof typeof CUSTOM_UNITS;
 
-const VOTE_CONTROLS = [
-  { value: 'one_per_browser', label: 'One per browser', hint: 'Light limit. A new browser can vote again.' },
-  { value: 'one_per_ip', label: 'One per network', hint: 'Stricter. People sharing Wi-Fi get one vote.' },
-  { value: 'open', label: 'Unlimited', hint: 'Anyone can vote as often as they like.' },
+interface Choice<T extends string> {
+  value: T;
+  label: string;
+  hint: string;
+}
+
+const choice = <T extends string>(labels: Record<T, string>, value: T, hint: string): Choice<T> => ({
+  value,
+  label: labels[value],
+  hint,
+});
+
+const VOTE_CONTROLS: Choice<VoteControl>[] = [
+  choice(VOTE_CONTROL_LABELS, 'one_per_browser', 'Light limit. A new browser can vote again.'),
+  choice(VOTE_CONTROL_LABELS, 'one_per_ip', 'Stricter. People sharing Wi-Fi get one vote.'),
+  choice(VOTE_CONTROL_LABELS, 'open', 'Anyone can vote as often as they like.'),
 ];
-const VISIBILITIES = [
-  { value: 'live', label: 'Live', hint: 'Everyone sees results as votes come in.' },
-  { value: 'after_voting', label: 'After voting', hint: 'Voters see results once they vote.' },
-  { value: 'private', label: 'Private', hint: 'Only you, with the admin link.' },
+const VISIBILITIES: Choice<ResultsVisibility>[] = [
+  choice(VISIBILITY_LABELS, 'live', 'Everyone sees results as votes come in.'),
+  choice(VISIBILITY_LABELS, 'after_voting', 'Voters see results once they vote.'),
+  choice(VISIBILITY_LABELS, 'private', 'Only you, with the admin link.'),
 ];
 
-function expiryMinutes({ expiry, customAmount, customUnit }) {
+interface FormState {
+  question: string;
+  options: string[];
+  expiry: string;
+  customAmount: string;
+  customUnit: CustomUnit;
+  voteControl: VoteControl;
+  visibility: ResultsVisibility;
+}
+
+function expiryMinutes({ expiry, customAmount, customUnit }: FormState): number {
   if (expiry !== 'custom') return Number(expiry);
   return Math.round(Number(customAmount) * CUSTOM_UNITS[customUnit]);
 }
 
-function validate(form) {
+function validate(form: FormState): string | null {
   const options = form.options.map((o) => o.trim());
   if (!form.question.trim()) return 'Enter a question.';
   if (options.some((o) => !o)) return 'Fill in every option, or remove the empty ones.';
@@ -48,7 +73,7 @@ function validate(form) {
   return null;
 }
 
-const INITIAL_FORM = {
+const INITIAL_FORM: FormState = {
   question: '',
   options: ['', ''],
   expiry: '1440',
@@ -59,19 +84,22 @@ const INITIAL_FORM = {
 };
 
 export default function CreatePollPage() {
-  const [form, setForm] = useState(INITIAL_FORM);
-  const [error, setError] = useState(null);
+  const [form, setForm] = useState<FormState>(INITIAL_FORM);
+  const [error, setError] = useState<Error | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [created, setCreated] = useState(null);
+  const [created, setCreated] = useState<CreatePollResponse | null>(null);
 
-  const update = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
-  const setOption = (index, value) =>
+  const update =
+    (field: Exclude<keyof FormState, 'options'>) =>
+    (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+      setForm((f) => ({ ...f, [field]: e.target.value }));
+  const setOption = (index: number, value: string) =>
     setForm((f) => ({ ...f, options: f.options.map((o, i) => (i === index ? value : o)) }));
   const addOption = () => setForm((f) => ({ ...f, options: [...f.options, ''] }));
-  const removeOption = (index) =>
+  const removeOption = (index: number) =>
     setForm((f) => ({ ...f, options: f.options.filter((_, i) => i !== index) }));
 
-  async function submit(e) {
+  async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const problem = validate(form);
     if (problem) {
@@ -90,7 +118,7 @@ export default function CreatePollPage() {
       });
       setCreated(poll);
     } catch (err) {
-      setError(err);
+      setError(toError(err));
     } finally {
       setSubmitting(false);
     }
@@ -232,23 +260,31 @@ export default function CreatePollPage() {
   );
 }
 
-function ChoiceGroup({ legend, name, choices, value, onChange }) {
+interface ChoiceGroupProps<T extends string> {
+  legend: string;
+  name: string;
+  choices: Choice<T>[];
+  value: T;
+  onChange: (e: ChangeEvent<HTMLInputElement>) => void;
+}
+
+function ChoiceGroup<T extends string>({ legend, name, choices, value, onChange }: ChoiceGroupProps<T>) {
   return (
     <fieldset className="field">
       <legend>{legend}</legend>
       <div className="choices">
-        {choices.map((choice) => (
-          <label key={choice.value} className={`choice ${value === choice.value ? 'selected' : ''}`}>
+        {choices.map((item) => (
+          <label key={item.value} className={`choice ${value === item.value ? 'selected' : ''}`}>
             <input
               type="radio"
               name={name}
-              value={choice.value}
-              checked={value === choice.value}
+              value={item.value}
+              checked={value === item.value}
               onChange={onChange}
             />
             <span>
-              <strong>{choice.label}</strong>
-              <span className="hint">{choice.hint}</span>
+              <strong>{item.label}</strong>
+              <span className="hint">{item.hint}</span>
             </span>
           </label>
         ))}

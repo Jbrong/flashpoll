@@ -1,4 +1,11 @@
-export default function Results({ options, results }) {
+import type { Results as ResultsData } from '../lib/types';
+
+interface ResultsProps {
+  options: string[];
+  results: ResultsData;
+}
+
+export default function Results({ options, results }: ResultsProps) {
   const { total_votes: total, counts } = results;
   const top = Math.max(...counts);
 

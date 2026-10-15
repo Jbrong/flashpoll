@@ -3,25 +3,20 @@ import { Link, useLocation } from 'react-router-dom';
 import CopyField from '../components/CopyField';
 import ErrorMessage from '../components/ErrorMessage';
 import Results from '../components/Results';
-import { api } from '../lib/api';
+import { ApiError, api, toError } from '../lib/api';
+import { VISIBILITY_LABELS, VOTE_CONTROL_LABELS } from '../lib/labels';
 import { formatDateTime, timeUntil } from '../lib/time';
+import type { AdminPoll } from '../lib/types';
 import { usePolling } from '../lib/usePolling';
 import NotFoundPage from './NotFoundPage';
 import { REFRESH_MS } from './PollPage';
 
-const VOTE_CONTROL_LABELS = {
-  open: 'Unlimited',
-  one_per_browser: 'One per browser',
-  one_per_ip: 'One per network',
-};
-const VISIBILITY_LABELS = { live: 'Live', after_voting: 'After voting', private: 'Private' };
-
 export default function AdminPage() {
   // The token lives in the URL fragment so it is never sent to the server (docs/spec.md, 1.2).
   const token = useLocation().hash.slice(1);
-  const [poll, setPoll] = useState(null);
-  const [error, setError] = useState(null);
-  const [actionError, setActionError] = useState(null);
+  const [poll, setPoll] = useState<AdminPoll | null>(null);
+  const [error, setError] = useState<Error | null>(null);
+  const [actionError, setActionError] = useState<Error | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleted, setDeleted] = useState(false);
@@ -31,7 +26,7 @@ export default function AdminPage() {
       setPoll(await api.getAdminPoll(token));
       setError(null);
     } catch (err) {
-      setError(err);
+      setError(toError(err));
     }
   }, [token]);
 
@@ -41,13 +36,13 @@ export default function AdminPage() {
 
   usePolling(load, REFRESH_MS, poll?.status === 'open' && !deleted);
 
-  async function run(action) {
+  async function run(action: () => Promise<void>) {
     setBusy(true);
     setActionError(null);
     try {
       await action();
     } catch (err) {
-      setActionError(err);
+      setActionError(toError(err));
     } finally {
       setBusy(false);
     }
@@ -60,7 +55,7 @@ export default function AdminPage() {
       setDeleted(true);
     });
 
-  if (!token || error?.status === 401 || error?.status === 404) {
+  if (!token || (error instanceof ApiError && (error.status === 401 || error.status === 404))) {
     return (
       <NotFoundPage
         title="Admin link not valid"

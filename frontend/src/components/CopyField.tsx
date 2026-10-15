@@ -1,8 +1,15 @@
-import { useState } from 'react';
+import { useId, useRef, useState } from 'react';
 
-export default function CopyField({ label, value, hint }) {
+interface CopyFieldProps {
+  label: string;
+  value: string;
+  hint?: string;
+}
+
+export default function CopyField({ label, value, hint }: CopyFieldProps) {
   const [copied, setCopied] = useState(false);
-  const id = `copy-${label.toLowerCase().replace(/\W+/g, '-')}`;
+  const input = useRef<HTMLInputElement>(null);
+  const id = useId();
 
   async function copy() {
     try {
@@ -10,7 +17,7 @@ export default function CopyField({ label, value, hint }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      document.getElementById(id)?.select();
+      input.current?.select();
     }
   }
 
@@ -18,7 +25,7 @@ export default function CopyField({ label, value, hint }) {
     <div className="copy-field">
       <label htmlFor={id}>{label}</label>
       <div className="copy-row">
-        <input id={id} readOnly value={value} onFocus={(e) => e.target.select()} />
+        <input id={id} ref={input} readOnly value={value} onFocus={(e) => e.target.select()} />
         <button type="button" className="button secondary" onClick={copy}>
           {copied ? 'Copied' : 'Copy'}
         </button>

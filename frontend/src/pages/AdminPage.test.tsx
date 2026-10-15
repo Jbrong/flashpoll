@@ -27,7 +27,7 @@ describe('AdminPage', () => {
     expect(await screen.findByRole('heading', { name: 'Lunch?' })).toBeInTheDocument();
     expect(screen.getByText('3 votes')).toBeInTheDocument();
     expect(screen.getByText('Private')).toBeInTheDocument();
-    expect(api.requests[0].headers.Authorization).toBe('Bearer secret-token');
+    expect(api.requests[0]!.headers.Authorization).toBe('Bearer secret-token');
   });
 
   it('rejects a missing token without calling the API', async () => {

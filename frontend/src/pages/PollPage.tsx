@@ -1,27 +1,28 @@
-import { useCallback, useEffect, useState } from 'react';
+import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import CopyField from '../components/CopyField';
 import ErrorMessage from '../components/ErrorMessage';
 import Results from '../components/Results';
-import { api } from '../lib/api';
+import { ApiError, api, toError } from '../lib/api';
 import { timeUntil } from '../lib/time';
+import type { Poll, ResultsResponse, ResultsVisibility } from '../lib/types';
 import { usePolling } from '../lib/usePolling';
 import NotFoundPage from './NotFoundPage';
 
 export const REFRESH_MS = 5000;
 
-const HIDDEN_RESULTS_MESSAGE = {
+const HIDDEN_RESULTS_MESSAGE: Partial<Record<ResultsVisibility, string>> = {
   after_voting: 'Results appear once you vote.',
   private: 'Results are private. Only the poll creator can see them.',
 };
 
 export default function PollPage() {
-  const { pollId } = useParams();
-  const [poll, setPoll] = useState(null);
-  const [results, setResults] = useState(null);
-  const [loadError, setLoadError] = useState(null);
-  const [voteError, setVoteError] = useState(null);
-  const [selected, setSelected] = useState(null);
+  const { pollId = '' } = useParams();
+  const [poll, setPoll] = useState<Poll | null>(null);
+  const [results, setResults] = useState<ResultsResponse | null>(null);
+  const [loadError, setLoadError] = useState<Error | null>(null);
+  const [voteError, setVoteError] = useState<Error | null>(null);
+  const [selected, setSelected] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const refreshResults = useCallback(async () => {
@@ -33,14 +34,14 @@ export default function PollPage() {
   }, [pollId]);
 
   const load = useCallback(
-    async (isCancelled = () => false) => {
+    async (isCancelled: () => boolean = () => false) => {
       try {
         const data = await api.getPoll(pollId);
         if (isCancelled()) return;
         setPoll(data);
         if (data.results_available) refreshResults();
       } catch (err) {
-        if (!isCancelled()) setLoadError(err);
+        if (!isCancelled()) setLoadError(toError(err));
       }
     },
     [pollId, refreshResults],
@@ -60,25 +61,27 @@ export default function PollPage() {
   const isOpen = poll?.status === 'open';
   usePolling(refreshResults, REFRESH_MS, Boolean(isOpen && poll?.results_available));
 
-  async function vote(e) {
+  async function vote(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (selected === null) return;
     setSubmitting(true);
     setVoteError(null);
     try {
       const response = await api.vote(pollId, selected);
-      setPoll((p) => ({ ...p, has_voted: true, results_available: response.results !== null }));
+      setPoll((p) => p && { ...p, has_voted: true, results_available: response.results !== null });
       if (response.results) setResults({ status: 'open', ...response.results });
     } catch (err) {
-      setVoteError(err);
+      setVoteError(toError(err));
       // The poll changed under us (already voted from this browser/network, or it closed).
-      if (err.code === 'already_voted' || err.code === 'poll_closed') await load();
+      if (err instanceof ApiError && (err.code === 'already_voted' || err.code === 'poll_closed')) {
+        await load();
+      }
     } finally {
       setSubmitting(false);
     }
   }
 
-  if (loadError?.status === 404) {
+  if (loadError instanceof ApiError && loadError.status === 404) {
     return (
       <NotFoundPage
         title="Poll not found"

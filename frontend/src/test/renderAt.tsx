@@ -2,7 +2,7 @@ import { render } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import App from '../App';
 
-export function renderAt(path) {
+export function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <App />

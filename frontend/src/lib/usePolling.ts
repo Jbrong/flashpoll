@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 
 /** Call `callback` every `intervalMs` while `enabled` and the tab is visible. */
-export function usePolling(callback, intervalMs, enabled) {
+export function usePolling(callback: () => unknown, intervalMs: number, enabled: boolean): void {
   const saved = useRef(callback);
   useEffect(() => {
     saved.current = callback;

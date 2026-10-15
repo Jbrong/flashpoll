@@ -18,7 +18,7 @@ const basePoll = {
 };
 const results = { status: 'open', total_votes: 4, counts: [1, 3, 0] };
 
-const meter = (name) => screen.getByRole('meter', { name });
+const meter = (name: string) => screen.getByRole('meter', { name });
 
 describe('PollPage', () => {
   afterEach(() => vi.useRealTimers());
@@ -44,11 +44,11 @@ describe('PollPage', () => {
     expect(screen.getByText('5 votes')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Vote' })).not.toBeInTheDocument();
 
-    const voteRequest = api.requests.find((r) => r.method === 'POST');
+    const voteRequest = api.requests.find((r) => r.method === 'POST')!;
     expect(voteRequest.body).toEqual({ option_index: 0 });
     expect(voteRequest.headers['X-Voter-Token']).toMatch(/^[\w-]{16,64}$/);
     // The same token is reused across requests.
-    expect(api.requests[0].headers['X-Voter-Token']).toBe(voteRequest.headers['X-Voter-Token']);
+    expect(api.requests[0]!.headers['X-Voter-Token']).toBe(voteRequest.headers['X-Voter-Token']);
   });
 
   it('hides results until voting when visibility is after_voting', async () => {

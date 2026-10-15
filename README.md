@@ -95,7 +95,7 @@ User → Route 53 → CloudFront → S3 (React frontend)
 
 ```
 flashpoll/
-├── frontend/              # React + Vite single-page app
+├── frontend/              # React + TypeScript + Vite single-page app
 │   ├── src/pages/         # Create, vote/results, admin pages
 │   ├── src/components/    # Shared UI (results bars, copy fields, layout)
 │   └── src/lib/           # API client, voter token, helpers
@@ -146,7 +146,7 @@ npm run dev                          # http://localhost:5173, proxies /api to :8
 
 ```bash
 cd backend  && pipenv run test && pipenv run lint
-cd frontend && npm test
+cd frontend && npm run typecheck && npm test
 ```
 
 Backend tests use [moto](https://github.com/getmoto/moto) to mock DynamoDB, so they don't need Docker.

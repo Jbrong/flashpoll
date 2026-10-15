@@ -1,5 +1,5 @@
 import { screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { apiError, mockApi } from '../test/mockApi';
 import { renderAt } from '../test/renderAt';
@@ -12,7 +12,7 @@ const created = {
   expires_at: '2026-10-16T18:00:00Z',
 };
 
-async function fillBasics(user) {
+async function fillBasics(user: UserEvent) {
   await user.type(screen.getByLabelText('Question'), '  Lunch?  ');
   await user.type(screen.getByLabelText('Option 1'), 'Pizza');
   await user.type(screen.getByLabelText('Option 2'), 'Tacos');
@@ -31,7 +31,7 @@ describe('CreatePollPage', () => {
     await user.click(screen.getByRole('button', { name: 'Create poll' }));
 
     expect(await screen.findByText('Your poll is live')).toBeInTheDocument();
-    expect(api.requests[0].body).toEqual({
+    expect(api.requests[0]!.body).toEqual({
       question: 'Lunch?',
       options: ['Pizza', 'Tacos'],
       expires_in_minutes: 60,
@@ -49,7 +49,7 @@ describe('CreatePollPage', () => {
     await fillBasics(user);
     await user.click(screen.getByRole('button', { name: 'Create poll' }));
     await screen.findByText('Your poll is live');
-    expect(api.requests[0].body).toMatchObject({
+    expect(api.requests[0]!.body).toMatchObject({
       expires_in_minutes: 1440,
       vote_control: 'one_per_browser',
       results_visibility: 'live',
@@ -82,14 +82,14 @@ describe('CreatePollPage', () => {
     await user.selectOptions(screen.getByLabelText('Custom duration unit'), 'days');
     await user.click(screen.getByRole('button', { name: 'Create poll' }));
     await screen.findByText('Your poll is live');
-    expect(api.requests[0].body.expires_in_minutes).toBe(3 * 1440);
+    expect(api.requests[0]!.body.expires_in_minutes).toBe(3 * 1440);
   });
 
   it.each([
-    ['an empty question', async () => {}, 'Enter a question.'],
+    ['an empty question', async (_user: UserEvent) => {}, 'Enter a question.'],
     [
       'duplicate options',
-      async (user) => {
+      async (user: UserEvent) => {
         await user.type(screen.getByLabelText('Question'), 'Q');
         await user.type(screen.getByLabelText('Option 1'), 'Same');
         await user.type(screen.getByLabelText('Option 2'), 'same');
@@ -98,7 +98,7 @@ describe('CreatePollPage', () => {
     ],
     [
       'a custom expiry under 15 minutes',
-      async (user) => {
+      async (user: UserEvent) => {
         await fillBasics(user);
         await user.click(screen.getByLabelText('Custom'));
         await user.clear(screen.getByLabelText('Custom duration'));
