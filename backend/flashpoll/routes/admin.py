@@ -1,7 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import APIRouter, Depends, Header, Response
 
 from ..deps import get_service
 from ..models import AdminPollView
@@ -10,24 +9,22 @@ from ..service import PollService
 router = APIRouter(prefix="/api/admin/poll", tags=["admin"])
 
 Service = Annotated[PollService, Depends(get_service)]
-Credentials = Annotated[HTTPAuthorizationCredentials | None, Depends(HTTPBearer(auto_error=False))]
-
-
-def _token(credentials: HTTPAuthorizationCredentials | None) -> str | None:
-    return credentials.credentials if credentials else None
+# A custom header rather than `Authorization`, so CloudFront can forward it with a plain
+# origin request policy allowlist (docs/spec.md, 2.2).
+AdminToken = Annotated[str | None, Header(alias="X-Admin-Token", max_length=128)]
 
 
 @router.get("")
-def get_admin_poll(service: Service, credentials: Credentials) -> AdminPollView:
-    return service.admin_view(_token(credentials))
+def get_admin_poll(service: Service, admin_token: AdminToken = None) -> AdminPollView:
+    return service.admin_view(admin_token)
 
 
 @router.post("/close")
-def close_poll(service: Service, credentials: Credentials) -> AdminPollView:
-    return service.admin_close(_token(credentials))
+def close_poll(service: Service, admin_token: AdminToken = None) -> AdminPollView:
+    return service.admin_close(admin_token)
 
 
 @router.delete("", status_code=204)
-def delete_poll(service: Service, credentials: Credentials) -> Response:
-    service.admin_delete(_token(credentials))
+def delete_poll(service: Service, admin_token: AdminToken = None) -> Response:
+    service.admin_delete(admin_token)
     return Response(status_code=204)

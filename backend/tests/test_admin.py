@@ -3,7 +3,7 @@ from conftest import VOTER_A, admin_headers, vote
 
 def test_admin_requires_valid_token(client, make_poll):
     make_poll()
-    for headers in ({}, admin_headers("not-a-real-token"), {"Authorization": "Basic abc"}):
+    for headers in ({}, admin_headers("not-a-real-token"), {"Authorization": "Bearer abc"}):
         response = client.get("/api/admin/poll", headers=headers)
         assert response.status_code == 401
         assert response.json()["error"]["code"] == "unauthorized"

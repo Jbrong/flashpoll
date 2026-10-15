@@ -43,7 +43,7 @@ def vote(
     settings: Annotated[Settings, Depends(get_settings)],
     voter_token: VoterToken = None,
 ) -> VoteResponse:
-    ip = client_ip(request, settings.trusted_proxy_count)
+    ip = client_ip(request, settings.client_ip_header)
     return VoteResponse(results=service.vote(poll_id, body.option_index, voter_token, ip))
 
 

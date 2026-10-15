@@ -37,19 +37,24 @@ class ResultsHidden(ApiError):
         super().__init__(403, "results_hidden", "Results are not visible yet")
 
 
+class Forbidden(ApiError):
+    def __init__(self):
+        super().__init__(403, "forbidden", "Requests must come through flashpoll.dev")
+
+
 class Unauthorized(ApiError):
     def __init__(self):
         super().__init__(401, "unauthorized", "Invalid or missing admin token")
 
 
-def _body(code: str, message: str, **extra) -> dict:
+def error_body(code: str, message: str, **extra) -> dict:
     return {"error": {"code": code, "message": message, **extra}}
 
 
 def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def api_error(_: Request, exc: ApiError):
-        return JSONResponse(_body(exc.code, exc.message), status_code=exc.status)
+        return JSONResponse(error_body(exc.code, exc.message), status_code=exc.status)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(_: Request, exc: RequestValidationError):
@@ -58,15 +63,15 @@ def register_error_handlers(app: FastAPI) -> None:
             for err in exc.errors()
         ]
         return JSONResponse(
-            _body("invalid_request", "Request is invalid", fields=fields), status_code=422
+            error_body("invalid_request", "Request is invalid", fields=fields), status_code=422
         )
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(_: Request, exc: StarletteHTTPException):
         code = "not_found" if exc.status_code == 404 else "http_error"
-        return JSONResponse(_body(code, str(exc.detail)), status_code=exc.status_code)
+        return JSONResponse(error_body(code, str(exc.detail)), status_code=exc.status_code)
 
     @app.exception_handler(Exception)
     async def unhandled_error(_: Request, exc: Exception):
         logger.exception("Unhandled error", exc_info=exc)
-        return JSONResponse(_body("internal_error", "Something went wrong"), status_code=500)
+        return JSONResponse(error_body("internal_error", "Something went wrong"), status_code=500)

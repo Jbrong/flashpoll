@@ -14,7 +14,10 @@ class Settings:
     polls_table: str = "flashpoll-polls"
     votes_table: str = "flashpoll-votes"
     cors_origins: list[str] = field(default_factory=lambda: ["http://localhost:5173"])
-    trusted_proxy_count: int = 0
+    # Header holding the real client address, set by a trusted proxy (CloudFront-Viewer-Address).
+    client_ip_header: str | None = None
+    # Shared secret the CDN adds to every origin request; requests without it are rejected.
+    origin_verify_secret: str | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -26,7 +29,6 @@ class Settings:
             polls_table=os.environ.get("POLLS_TABLE", defaults.polls_table),
             votes_table=os.environ.get("VOTES_TABLE", defaults.votes_table),
             cors_origins=_csv(os.environ.get("CORS_ORIGINS", ",".join(defaults.cors_origins))),
-            trusted_proxy_count=int(
-                os.environ.get("TRUSTED_PROXY_COUNT", defaults.trusted_proxy_count)
-            ),
+            client_ip_header=os.environ.get("CLIENT_IP_HEADER") or None,
+            origin_verify_secret=os.environ.get("ORIGIN_VERIFY_SECRET") or None,
         )

@@ -68,11 +68,11 @@ def vote(client, poll_id: str, option_index: int, voter: str | None = None, ip: 
     if voter:
         headers["X-Voter-Token"] = voter
     if ip:
-        headers["X-Forwarded-For"] = ip
+        headers["CloudFront-Viewer-Address"] = f"{ip}:4567"
     return client.post(
         f"/api/polls/{poll_id}/votes", json={"option_index": option_index}, headers=headers
     )
 
 
 def admin_headers(token: str) -> dict:
-    return {"Authorization": f"Bearer {token}"}
+    return {"X-Admin-Token": token}

@@ -20,14 +20,14 @@ const adminPoll = {
 };
 
 describe('AdminPage', () => {
-  it('loads with the token from the URL fragment as a bearer token', async () => {
+  it('loads with the token from the URL fragment, sent as X-Admin-Token', async () => {
     const api = mockApi({ 'GET /api/admin/poll': adminPoll });
     renderAt('/admin#secret-token');
 
     expect(await screen.findByRole('heading', { name: 'Lunch?' })).toBeInTheDocument();
     expect(screen.getByText('3 votes')).toBeInTheDocument();
     expect(screen.getByText('Private')).toBeInTheDocument();
-    expect(api.requests[0]!.headers.Authorization).toBe('Bearer secret-token');
+    expect(api.requests[0]!.headers['X-Admin-Token']).toBe('secret-token');
   });
 
   it('rejects a missing token without calling the API', async () => {

@@ -62,7 +62,7 @@ async function request<T>(path: string, { method = 'GET', body, headers = {} }: 
 }
 
 const voter = () => ({ 'X-Voter-Token': getVoterToken() });
-const admin = (token: string) => ({ Authorization: `Bearer ${token}` });
+const admin = (token: string) => ({ 'X-Admin-Token': token });
 const pollPath = (pollId: string) => `/api/polls/${encodeURIComponent(pollId)}`;
 
 export const api = {

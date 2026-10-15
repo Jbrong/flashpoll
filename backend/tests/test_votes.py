@@ -70,7 +70,7 @@ def test_one_per_browser_requires_voter_token(client, make_poll):
 
 @pytest.fixture
 def proxied_client(aws, frozen_clock):
-    settings = Settings(**{**SETTINGS.__dict__, "trusted_proxy_count": 1})
+    settings = Settings(**{**SETTINGS.__dict__, "client_ip_header": "CloudFront-Viewer-Address"})
     return TestClient(create_app(settings), raise_server_exceptions=False)
 
 
@@ -88,12 +88,19 @@ def test_one_per_ip(proxied_client, make_poll):
     assert results(client, poll["poll_id"]).json()["counts"] == [1, 1, 0]
 
 
-def test_one_per_ip_ignores_spoofed_forwarded_entries(proxied_client, make_poll):
+def test_one_per_ip_ignores_x_forwarded_for(proxied_client, make_poll):
     client = proxied_client
     poll = make_poll(vote_control="one_per_ip")
-    assert vote(client, poll["poll_id"], 0, ip="1.1.1.1, 203.0.113.7").status_code == 200
-    # The client-controlled left-hand entry changes, but the trusted hop does not.
-    assert vote(client, poll["poll_id"], 0, ip="2.2.2.2, 203.0.113.7").status_code == 409
+    pid = poll["poll_id"]
+    headers = {"CloudFront-Viewer-Address": "203.0.113.7:1111"}
+    assert vote(client, pid, 0, ip="203.0.113.7").status_code == 200
+    # A spoofed X-Forwarded-For changes nothing: only the CloudFront header counts.
+    response = client.post(
+        f"/api/polls/{pid}/votes",
+        json={"option_index": 0},
+        headers={**headers, "X-Forwarded-For": "9.9.9.9"},
+    )
+    assert response.status_code == 409
 
 
 def test_raw_ip_and_voter_token_are_not_stored(proxied_client, make_poll, aws):

@@ -122,6 +122,7 @@ Every non-2xx response has this body:
 |---|---|---|
 | 401 | `unauthorized` | Missing or invalid admin token |
 | 403 | `results_hidden` | Results not visible to this caller (1.4) |
+| 403 | `forbidden` | Request didn't come through CloudFront (missing origin secret, 4.2) |
 | 404 | `poll_not_found` | Unknown, deleted, or past-TTL poll |
 | 404 | `not_found` | Unknown route |
 | 409 | `poll_closed` | Vote on a closed poll |
@@ -134,7 +135,7 @@ Every non-2xx response has this body:
 | Header | Used by | Purpose |
 |---|---|---|
 | `X-Voter-Token` | poll, vote, results | Identifies this browser for `one_per_browser` and `after_voting`. 16–64 chars of `[A-Za-z0-9_-]`. |
-| `Authorization: Bearer {adminToken}` | admin endpoints | Admin auth. Kept out of the URL so it doesn't land in API access logs. |
+| `X-Admin-Token: {adminToken}` | admin endpoints | Admin auth. Kept out of the URL so it doesn't land in access logs. A custom header rather than `Authorization` so CloudFront can forward it with a plain allowlist. |
 
 ### 2.3 Endpoints
 
@@ -199,15 +200,15 @@ Public view of a poll. Never includes admin data.
 
 #### `GET /api/admin/poll` → `200`
 
-Bearer auth. Returns the public poll view plus `results` and `deletes_at`.
+Admin auth (`X-Admin-Token`). Returns the public poll view plus `results` and `deletes_at`.
 
 #### `POST /api/admin/poll/close` → `200`
 
-Bearer auth. Closes voting now. Idempotent. Returns the same body as `GET /api/admin/poll`.
+Admin auth (`X-Admin-Token`). Closes voting now. Idempotent. Returns the same body as `GET /api/admin/poll`.
 
 #### `DELETE /api/admin/poll` → `204`
 
-Bearer auth. Deletes the poll and all its vote records.
+Admin auth (`X-Admin-Token`). Deletes the poll and all its vote records.
 
 #### `GET /api/health` → `200`
 
@@ -278,12 +279,17 @@ All-or-nothing: a rejected repeat vote never increments the count.
 - **Frontend**: React + Vite, static build served from S3 via CloudFront.
 - **Data**: DynamoDB, as above.
 
-### 4.2 Client IP
+### 4.2 Client IP and origin protection
 
 `one_per_ip` needs the real client IP. Behind CloudFront + API Gateway the socket peer is
-not the client. `TRUSTED_PROXY_COUNT` (env, default `0`) tells the API how many proxy hops
-to trust: `0` uses the socket peer; `N` uses the Nth entry from the right of
-`X-Forwarded-For`. The exact value is set when the infrastructure is deployed.
+not the client, and `X-Forwarded-For` can be partly forged by the caller. Instead:
+
+- CloudFront forwards `CloudFront-Viewer-Address` (`ip:port`), which it sets itself. The API
+  reads the IP from the header named by `CLIENT_IP_HEADER`; locally that is unset and the
+  socket peer is used.
+- CloudFront adds a secret `X-Origin-Verify` header to every API request. When
+  `ORIGIN_VERIFY_SECRET` is set, the API rejects requests without it (403 `forbidden`), so
+  nobody can call API Gateway directly and forge the viewer header.
 
 ### 4.3 Configuration (backend env)
 
@@ -295,7 +301,21 @@ to trust: `0` uses the socket peer; `N` uses the Nth entry from the right of
 | `POLLS_TABLE` | `flashpoll-polls` | |
 | `VOTES_TABLE` | `flashpoll-votes` | |
 | `CORS_ORIGINS` | `http://localhost:5173` | Comma-separated; empty disables CORS |
-| `TRUSTED_PROXY_COUNT` | `0` | See 4.2 |
+| `CLIENT_IP_HEADER` | unset | Header holding the client IP (`CloudFront-Viewer-Address` in AWS) |
+| `ORIGIN_VERIFY_SECRET` | unset | Required `X-Origin-Verify` value (set by Terraform in AWS) |
+
+### 4.4 AWS deployment
+
+Terraform in `infrastructure/` (runbook in `infrastructure/README.md`):
+
+- **CloudFront** serves the S3 frontend (private bucket, Origin Access Control) and routes
+  `/api/*` to API Gateway with caching disabled. A CloudFront Function rewrites app routes
+  to `index.html` and redirects `www` to the apex. A response-headers policy sets HSTS, CSP,
+  `X-Frame-Options: DENY`, `nosniff` and `Referrer-Policy`.
+- **API Gateway HTTP API** → one **Lambda** (python3.13, arm64) running the FastAPI app via
+  Mangum. Stage-level throttling guards cost until WAF arrives in Phase 3.
+- **DynamoDB** tables as in section 3, on-demand, TTL enabled, deletion protection on.
+- Terraform state in a versioned, encrypted S3 bucket with native locking.
 
 ---
 
@@ -305,7 +325,7 @@ to trust: `0` uses the socket peer; `N` uses the Nth entry from the right of
 |---|---|---|
 | **1 — Core** | Everything in sections 1–3 except WebSocket push. Local dev with DynamoDB Local. | Backend and frontend tests pass; full flow works locally (create → vote → results → admin close/delete). |
 | **2 — Real-time** | API Gateway WebSocket API; connect/disconnect handlers store connections per poll; vote handler broadcasts new counts. Frontend swaps polling for a socket, falling back to polling. | Two browsers on one poll see each other's votes in under 1s. |
-| **3 — Security hardening** | WAF rate limits (votes per IP, creates per IP), CloudWatch alarms and dashboards, security headers via CloudFront response policy. | Rate limits verified; alarms fire on test traffic. |
+| **3 — Security hardening** | WAF rate limits (votes per IP, creates per IP), CloudWatch alarms and dashboards, origin secret in Secrets Manager. (Security headers and origin protection already shipped with the Phase 1 infra.) | Rate limits verified; alarms fire on test traffic. |
 | **4 — IaC & polish** | All AWS resources in Terraform; GitHub Actions for test, plan, deploy; architecture diagram and write-up. | Clean `terraform apply` from scratch; CI deploys on merge to `master`. |
 
 Phase 4's Terraform work is being pulled forward to deploy Phase 1.
