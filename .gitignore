@@ -24,3 +24,9 @@ samconfig.toml.bak
 
 # AWS
 .aws/
+
+# Lambda build output
+backend/dist/
+
+# Terraform partial backend config
+infrastructure/backend.hcl

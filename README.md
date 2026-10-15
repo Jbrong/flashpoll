@@ -47,7 +47,7 @@ Flashpoll runs on a fully serverless AWS stack — intentionally different from 
 ```
 User → Route 53 → CloudFront → S3 (React frontend)
                       ↓
-              API Gateway (REST + WebSocket)
+              API Gateway (HTTP API; WebSocket in Phase 2)
                       ↓
                    Lambda
                       ↓
@@ -60,9 +60,9 @@ User → Route 53 → CloudFront → S3 (React frontend)
 |---|---|
 | Route 53 | Domain + DNS for flashpoll.dev |
 | S3 + CloudFront | Static React frontend, global CDN |
-| API Gateway (REST) | Poll CRUD — create, read, vote |
+| API Gateway (HTTP API) | Poll CRUD — create, read, vote |
 | API Gateway (WebSocket) | Real-time results push to connected clients |
-| Lambda | Serverless backend functions (Python) |
+| Lambda | FastAPI backend (Python 3.13, arm64) |
 | DynamoDB | Polls, votes, admin tokens — TTL for auto-expiry |
 | WAF | Rate limiting on vote endpoint — prevent stuffing |
 | CloudWatch | Monitoring, alarms, anomaly detection |
@@ -82,12 +82,13 @@ User → Route 53 → CloudFront → S3 (React frontend)
 
 - **WAF rate limiting** on the vote endpoint — configurable per poll, enforces one-per-IP when selected
 - **DynamoDB TTL** handles data lifecycle automatically — no lingering PII after expiry
-- **Admin tokens** are 192-bit random secrets; only their SHA-256 hash is stored. The token travels in the URL fragment (never sent to the server, so never in access logs) and as a `Bearer` header to the API
+- **Admin tokens** are 192-bit random secrets; only their SHA-256 hash is stored. The token travels in the URL fragment (never sent to the server, so never in access logs) and as an `X-Admin-Token` header to the API
 - **Server-enforced rules** — vote control and results visibility are checked by the API, not just hidden in the UI
 - **No raw IPs stored** — vote-control markers are per-poll hashes
 - **Lambda execution roles** scoped to minimum required permissions — no wildcards
 - **No user accounts in v1** — minimal attack surface by design
-- **HTTPS enforced** via CloudFront + ACM — no plain HTTP
+- **HTTPS enforced** via CloudFront + ACM — no plain HTTP; HSTS, CSP and other security headers set at the edge
+- **API only reachable through CloudFront** — a secret origin header is required, and the voter IP comes from CloudFront's own `CloudFront-Viewer-Address`
 
 ---
 
@@ -104,7 +105,8 @@ flashpoll/
 │   ├── tests/             # pytest suite against mocked DynamoDB (moto)
 │   ├── scripts/           # Local table bootstrap
 │   └── lambda_handler.py  # AWS Lambda entry point
-├── infrastructure/        # Terraform — all AWS resources
+├── infrastructure/        # Terraform — all AWS resources (runbook in its README)
+├── scripts/               # build_lambda.sh, deploy_frontend.sh
 ├── docs/spec.md           # Product, API and data model spec
 └── docker-compose.yml     # DynamoDB Local
 ```
@@ -155,19 +157,17 @@ Backend tests use [moto](https://github.com/getmoto/moto) to mock DynamoDB, so t
 
 ## ⚙️ Deployment
 
-Infrastructure managed with Terraform. Lambda functions deployed via GitHub Actions on push to `main`.
+Infrastructure is managed with Terraform in [`infrastructure/`](infrastructure/). The
+step-by-step first deploy (state bucket, plan/apply, frontend publish, smoke tests) is in
+[`infrastructure/README.md`](infrastructure/README.md). In short:
 
 ```bash
-cd infrastructure/
-terraform init
-terraform plan
-terraform apply
+scripts/build_lambda.sh                         # package the API for Lambda
+terraform -chdir=infrastructure apply           # all AWS resources
+scripts/deploy_frontend.sh                      # build + upload the frontend, invalidate CDN
 ```
 
-GitHub Actions workflows:
-- `frontend-deploy.yml` — Build React → upload to S3 → invalidate CloudFront cache
-- `backend-deploy.yml` — Package Python → deploy Lambda functions via AWS CLI
-- `terraform-plan.yml` — Run `terraform plan` on all PRs
+CI/CD with GitHub Actions is planned for Phase 4.
 
 ---
 
