@@ -9,7 +9,7 @@ def test_create_returns_links_and_expiry(make_poll):
     assert len(poll["poll_id"]) == 8
     assert len(poll["admin_token"]) == 32
     assert poll["share_url"] == f"https://flashpoll.test/p/{poll['poll_id']}"
-    assert poll["admin_url"] == f"https://flashpoll.test/admin/{poll['admin_token']}"
+    assert poll["admin_url"] == f"https://flashpoll.test/admin#{poll['admin_token']}"
     assert poll["expires_at"] == "2027-01-15T09:30:00Z"
 
 

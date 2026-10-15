@@ -19,7 +19,7 @@ have everything deleted automatically when the poll is done.
 |---|---|---|
 | `/` | Create poll | Anyone |
 | `/p/{pollId}` | Vote + results | Anyone with the share link |
-| `/admin/{adminToken}` | Manage poll | Whoever holds the admin link |
+| `/admin#{adminToken}` | Manage poll | Whoever holds the admin link |
 | anything else | Not found | — |
 
 ### 1.2 Creating a poll
@@ -37,7 +37,10 @@ Inputs:
 On success the creator sees two links:
 
 - **Share link** — `https://flashpoll.dev/p/{pollId}`
-- **Admin link** — `https://flashpoll.dev/admin/{adminToken}`
+- **Admin link** — `https://flashpoll.dev/admin#{adminToken}`
+
+The admin token sits in the URL *fragment* (after `#`). Browsers never send the fragment to
+the server, so it stays out of CloudFront/S3 access logs and `Referer` headers.
 
 The admin link is shown **once**. The server stores only a hash of the admin token, so a
 lost admin link cannot be recovered. The UI says so and offers copy buttons.
@@ -151,7 +154,7 @@ Every non-2xx response has this body:
   "poll_id": "Xk3_9aQz",
   "admin_token": "q0V…32 chars…",
   "share_url": "https://flashpoll.dev/p/Xk3_9aQz",
-  "admin_url": "https://flashpoll.dev/admin/q0V…",
+  "admin_url": "https://flashpoll.dev/admin#q0V…",
   "expires_at": "2026-10-16T18:00:00Z"
 }
 ```
@@ -320,6 +323,6 @@ These were chosen while drafting; change any of them before they harden.
 4. **Admin link is unrecoverable** (only a hash is stored).
 5. **Default vote control `one_per_browser`, default visibility `live`.**
 6. **Single Lambda** running the whole FastAPI app (4.1).
-7. **Share/admin URL shapes** `/p/{id}` and `/admin/{token}` (as in the README; the earlier
-   code used `/poll/…`).
+7. **URL shapes** `/p/{id}` (as in the README) and `/admin#{token}` (fragment instead of the
+   README's `/admin/{token}`, to keep the token out of server logs).
 8. **Python 3.13** (newest Lambda runtime) instead of 3.10.

@@ -58,7 +58,7 @@ class PollService:
             poll_id=poll["poll_id"],
             admin_token=admin_token,
             share_url=f"{self.settings.app_url}/p/{poll['poll_id']}",
-            admin_url=f"{self.settings.app_url}/admin/{admin_token}",
+            admin_url=f"{self.settings.app_url}/admin#{admin_token}",
             expires_at=clock.iso(expires_at),
         )
 

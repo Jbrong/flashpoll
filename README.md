@@ -28,13 +28,15 @@ Think of it as the **Snapchat of polls** — fast, frictionless, and ephemeral.
 2. Enter your question and up to 6 options
 3. Choose your settings:
    - **Expiry** — 1 hour / 1 day / 1 week / custom (15 min–15 days)
-   - **Vote control** — open / one per browser / one per IP
+   - **Vote control** — unlimited / one per browser / one per network (IP)
    - **Results visibility** — live / after voting / private
 4. Click **Create** — you get two links instantly:
    - 🔗 **Share link** — `flashpoll.dev/p/abc123` — send to voters
-   - 🔑 **Admin link** — `flashpoll.dev/admin/xyz789` — keep private
+   - 🔑 **Admin link** — `flashpoll.dev/admin#xyz789…` — keep private (close or delete the poll)
 
 No account. No email. No friction.
+
+The full product and API spec lives in [`docs/spec.md`](docs/spec.md).
 
 ---
 
@@ -80,7 +82,9 @@ User → Route 53 → CloudFront → S3 (React frontend)
 
 - **WAF rate limiting** on the vote endpoint — configurable per poll, enforces one-per-IP when selected
 - **DynamoDB TTL** handles data lifecycle automatically — no lingering PII after expiry
-- **Admin tokens** are UUID v4 secrets stored in DynamoDB — no auth system needed for v1
+- **Admin tokens** are 192-bit random secrets; only their SHA-256 hash is stored. The token travels in the URL fragment (never sent to the server, so never in access logs) and as a `Bearer` header to the API
+- **Server-enforced rules** — vote control and results visibility are checked by the API, not just hidden in the UI
+- **No raw IPs stored** — vote-control markers are per-poll hashes
 - **Lambda execution roles** scoped to minimum required permissions — no wildcards
 - **No user accounts in v1** — minimal attack surface by design
 - **HTTPS enforced** via CloudFront + ACM — no plain HTTP
@@ -91,20 +95,18 @@ User → Route 53 → CloudFront → S3 (React frontend)
 
 ```
 flashpoll/
-├── frontend/          # React app
-├── backend/           # Python Lambda functions
-│   ├── polls/         # Create, read, delete poll handlers
-│   ├── votes/         # Vote handler
-│   ├── websocket/     # WebSocket connect/disconnect/broadcast
-│   └── shared/        # Shared utilities, DynamoDB client
-├── infrastructure/    # Terraform — all AWS resources
-│   └── modules/       # api_gateway, lambda, dynamodb, cloudfront, waf
-├── docs/
-│   ├── architecture/  # System diagrams
-│   └── writeup.md     # Portfolio case study
-├── .github/workflows/ # CI/CD — deploy frontend + Lambda functions
-├── .env.example
-└── README.md
+├── frontend/              # React + Vite single-page app
+│   ├── src/pages/         # Create, vote/results, admin pages
+│   ├── src/components/    # Shared UI (results bars, copy fields, layout)
+│   └── src/lib/           # API client, voter token, helpers
+├── backend/               # Python API (FastAPI; runs on Lambda via Mangum)
+│   ├── flashpoll/         # App package: routes, service rules, DynamoDB store
+│   ├── tests/             # pytest suite against mocked DynamoDB (moto)
+│   ├── scripts/           # Local table bootstrap
+│   └── lambda_handler.py  # AWS Lambda entry point
+├── infrastructure/        # Terraform — all AWS resources
+├── docs/spec.md           # Product, API and data model spec
+└── docker-compose.yml     # DynamoDB Local
 ```
 
 ---
@@ -112,31 +114,42 @@ flashpoll/
 ## 🚀 Running Locally
 
 ### Prerequisites
-- Node.js 18+
-- Python 3.11+
-- AWS SAM CLI or Docker (for local Lambda)
-- AWS CLI (configured)
+- Node.js 20+
+- Python 3.13 + [pipenv](https://pipenv.pypa.io/)
+- Docker (for DynamoDB Local)
 
-### Setup
+### 1. Database
 
 ```bash
-git clone https://github.com/Jbrong/flashpoll.git
-cd flashpoll
-cp .env.example .env        # Fill in local dev values
+docker compose up -d                 # DynamoDB Local on :8000
 ```
 
-**Frontend:**
-```bash
-cd frontend
-npm install
-npm run dev                 # Runs at http://localhost:3000
-```
+### 2. Backend
 
-**Backend (Lambda locally via SAM):**
 ```bash
 cd backend
-sam local start-api         # Runs API at http://localhost:3001
+cp .env.example .env
+pipenv install --dev
+pipenv run bootstrap                 # create the tables in DynamoDB Local
+pipenv run dev                       # API on http://localhost:8080 (docs at /api/docs)
 ```
+
+### 3. Frontend
+
+```bash
+cd frontend
+npm ci
+npm run dev                          # http://localhost:5173, proxies /api to :8080
+```
+
+### Tests
+
+```bash
+cd backend  && pipenv run test && pipenv run lint
+cd frontend && npm test
+```
+
+Backend tests use [moto](https://github.com/getmoto/moto) to mock DynamoDB, so they don't need Docker.
 
 ---
 
@@ -160,21 +173,12 @@ GitHub Actions workflows:
 
 ## 📊 Data Model
 
-**Poll record (DynamoDB):**
-```json
-{
-  "pollId": "abc123",
-  "adminToken": "xyz789-uuid-v4",
-  "question": "What should we have for lunch?",
-  "options": ["Pizza", "Tacos", "Salad"],
-  "voteControl": "one_per_browser",
-  "resultsVisibility": "after_voting",
-  "expiresAt": 1234567890,
-  "ttl": 1234567890
-}
-```
+Two DynamoDB tables, both with TTL on `ttl`:
 
-`ttl` = DynamoDB TTL attribute — record auto-deletes at expiry. No cleanup needed.
+- **`flashpoll-polls`** — one item per poll: question, options, settings, live vote `counts`, `expires_at`, and `ttl` (= expiry + 24h grace). GSI on `admin_token_hash`.
+- **`flashpoll-votes`** — one marker per voter (hashed browser token or IP) to enforce vote control.
+
+Votes are counted atomically with a DynamoDB transaction, so reading results is a single `GetItem`. Details in [`docs/spec.md`](docs/spec.md#3-data-model-dynamodb).
 
 ---
 
@@ -183,7 +187,7 @@ GitHub Actions workflows:
 - [x] Concept defined
 - [x] Domain registered (flashpoll.dev)
 - [x] Architecture designed
-- [ ] Phase 1 — Core (poll CRUD, DynamoDB TTL, shareable links)
+- [ ] Phase 1 — Core (poll CRUD, DynamoDB TTL, shareable links) — code + tests done, deploy pending
 - [ ] Phase 2 — Real-time (WebSocket live results)
 - [ ] Phase 3 — Security hardening (WAF, CloudWatch alarms)
 - [ ] Phase 4 — Terraform IaC, architecture writeup, portfolio polish
